@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#176b4d">
+<title>Мой дневник курения</title>
+<style>
+:root{color-scheme:light;--bg:#f3f6f4;--card:#fff;--text:#17221c;--muted:#66736b;--green:#176b4d;--soft:#e4f2e9;--line:#e1e8e3;--red:#b64242}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.4 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+header{background:var(--green);color:white;padding:24px 18px 28px;border-radius:0 0 24px 24px}
+header h1{font-size:24px;margin:0 0 6px}header p{margin:0;opacity:.88;font-size:14px}
+main{max-width:620px;margin:0 auto;padding:14px 14px 40px}
+.card{background:var(--card);border-radius:18px;padding:16px;margin:0 0 14px;box-shadow:0 2px 10px #1633220a}
+.row{display:flex;align-items:center;justify-content:space-between;gap:12px}.stats{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.stat{background:#f5f8f6;border-radius:13px;padding:13px}.stat small{display:block;color:var(--muted);font-size:12px}.stat strong{display:block;font-size:27px;margin:4px 0 0}
+h2{font-size:18px;margin:0 0 12px}p.muted,small.muted{color:var(--muted)}
+.progress{height:7px;border-radius:99px;background:#e8eee9;overflow:hidden;margin:12px 0 4px}.progress span{display:block;height:100%;background:#3c9a68;width:0;transition:width .2s}
+.item{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--line)}.item:last-child{border-bottom:0}
+.item input[type=checkbox]{width:23px;height:23px;accent-color:var(--green);flex:0 0 auto}.item .details{flex:1}.item .num{font-size:12px;color:var(--muted);display:block}.item.done .time-label{text-decoration:line-through;color:var(--muted)}
+.time-label{font-weight:650}.time-edit{width:112px;padding:9px;border:1px solid var(--line);border-radius:10px;font:inherit}
+button{font:inherit;border:0;border-radius:12px;padding:12px 14px;cursor:pointer;font-weight:650}
+.primary{background:var(--green);color:#fff;width:100%}.secondary{background:var(--soft);color:var(--green)}.outline{background:#fff;border:1px solid var(--line);color:var(--text)}.danger{color:var(--red);background:#fff0f0}
+button:active{transform:scale(.99)}.button-row{display:flex;gap:8px;flex-wrap:wrap}.button-row button{flex:1}
+.field{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0}.field input[type=number]{width:84px;padding:9px;border:1px solid var(--line);border-radius:10px;font:inherit}
+textarea{width:100%;border:1px solid var(--line);border-radius:12px;padding:11px;font:inherit;resize:vertical}
+.history-entry{border:1px solid var(--line);border-radius:13px;padding:12px;margin-top:10px}.history-entry p{margin:6px 0;font-size:14px}.pill{font-size:12px;border-radius:99px;padding:5px 8px;background:var(--soft);color:var(--green);white-space:nowrap}.pill.over{background:#fff0f0;color:var(--red)}
+.notice{font-size:12px;color:var(--muted);line-height:1.5;margin:10px 0 0}
+details summary{font-weight:700;cursor:pointer}footer{text-align:center;font-size:12px;color:var(--muted);padding:8px 20px 24px}
+#toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#17221c;color:#fff;padding:12px 16px;border-radius:12px;display:none;max-width:90%;z-index:5}
+@media(min-width:520px){header{padding-left:max(18px,calc((100vw - 590px)/2));padding-right:max(18px,calc((100vw - 590px)/2))}}
+</style>
+</head>
+<body>
+<header><h1>Мой дневник курения</h1><p>Цель — постепенно перейти с 20 к 10 сигаретам в день.</p></header>
+<main>
+<section class="card" id="accountCard">
+ <h2>Облачная синхронизация</h2>
+ <p class="muted" style="font-size:14px">Войди в свой аккаунт, чтобы хранить записи в облаке и открывать их на телефоне и ноутбуке.</p>
+ <label for="authEmail"><strong>Email</strong></label>
+ <input id="authEmail" type="email" autocomplete="username" placeholder="Твой Gmail" style="width:100%;padding:11px;border:1px solid var(--line);border-radius:12px;font:inherit;margin:6px 0 10px">
+ <label for="authPassword"><strong>Пароль дневника</strong></label>
+ <input id="authPassword" type="password" autocomplete="current-password" placeholder="Пароль, созданный в Supabase" style="width:100%;padding:11px;border:1px solid var(--line);border-radius:12px;font:inherit;margin:6px 0 10px">
+ <div class="button-row"><button class="primary" id="loginBtn" type="button">Войти и синхронизировать</button><button class="outline" id="logoutBtn" type="button" style="display:none">Выйти</button></div>
+ <p id="syncStatus" class="notice">Статус: не подключено к облаку.</p>
+</section>
+<section class="card">
+ <div class="row"><h2 style="margin:0">Сегодня</h2><span id="dateLabel" class="muted"></span></div>
+ <div class="stats" style="margin-top:14px">
+  <div class="stat"><small>Выкурено</small><strong id="smokedCount">0</strong><small id="plannedText">из 10 запланированных</small></div>
+  <div class="stat"><small>До лимита</small><strong id="remaining">10</strong><small id="limitState">сигарет осталось</small></div>
+  <div class="stat"><small>Меньше обычного</small><strong id="lessCount">20</strong><small>относительно 20 в день</small></div>
+  <div class="stat"><small>Сокращение</small><strong id="reduction">100%</strong><small>от привычного количества</small></div>
+ </div>
+ <div class="progress"><span id="progressBar"></span></div>
+ <small class="muted" id="progressText">0 из 10 отмечено</small>
+</section>
+<section class="card">
+ <div class="row"><h2 style="margin:0">Расписание</h2><button class="secondary" id="editBtn">Изменить время</button></div>
+ <div class="button-row" style="margin-top:10px"><button class="outline" id="addTimeBtn" type="button">＋ Добавить дополнительное время</button></div>
+ <p class="muted" style="font-size:13px;margin:8px 0 2px">Отмечай каждую выкуренную сигарету. Если пропустил время — не нужно наверстывать.</p>
+ <div id="schedule"></div>
+</section>
+<section class="card">
+ <h2>Настройки</h2>
+ <div class="field"><div><strong>Дневной лимит</strong><br><small class="muted">Можно менять по мере сокращения</small></div><input id="limitInput" type="number" min="1" max="20" value="10" aria-label="Дневной лимит"></div>
+ <label for="note"><strong>Заметка за день</strong></label>
+ <textarea id="note" rows="2" placeholder="Например: стрессовый день, особенно хотелось после обеда…"></textarea>
+ <p class="notice">После входа данные сохраняются в облаке и загружаются при открытии дневника. Рекомендуется периодически делать экспорт резервной копии.</p>
+</section>
+<section class="card">
+ <h2>Завершить день</h2>
+ <p class="muted" style="font-size:14px">Сохрани итог, чтобы добавить день в статистику и начать новый учёт. Лучше делать это в конце дня.</p>
+ <button class="primary" id="saveDay">Сохранить итог и начать новый день</button>
+ <div class="button-row" style="margin-top:9px"><button class="outline" id="resetChecks">Сбросить отметки</button></div>
+</section>
+<section class="card">
+ <div class="row"><h2 style="margin:0">Статистика</h2><span id="daysCount" class="pill">0 дней</span></div>
+ <div class="stats" style="margin-top:12px">
+  <div class="stat"><small>Среднее за день</small><strong id="average">—</strong><small>сигарет</small></div>
+  <div class="stat"><small>Всего учтено</small><strong id="totalDaysSmoked">0</strong><small>сигарет в истории</small></div>
+ </div>
+ <div id="historyList"></div>
+ <p id="emptyHistory" class="muted" style="font-size:14px">Пока нет завершённых дней. Сохрани первый итог — здесь появится история.</p>
+ <div class="button-row" style="margin-top:12px"><button class="outline" id="exportBtn">Экспорт данных</button><button class="outline" id="importBtn">Импорт данных</button></div>
+ <input id="importFile" type="file" accept="application/json,.json" hidden>
+ <button class="danger" id="clearHistory" style="width:100%;margin-top:9px">Удалить всю историю</button>
+</section>
+</main>
+<footer>Сокращение — хороший шаг. Не компенсируй меньшее количество более глубокими затяжками.</footer>
+<div id="toast" role="status"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+(() => {
+ const KEY='smokingDiaryApp_v1';
+ const defaultTimes=['09:00','10:30','12:00','13:30','15:00','16:30','18:00','19:30','21:00','22:30'];
+ let state={times:defaultTimes,checked:[],limit:10,note:'',history:[],dayStarted:new Date().toISOString().slice(0,10),editing:false};
+ const $=id=>document.getElementById(id);
+ const SUPABASE_URL='https://bpdkeogfijpcipauqktv.supabase.co';
+ const SUPABASE_KEY='sb_publishable_TCnm7714eDOGW3NrYGD09w_JFu-S4OR';
+ const cloud=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+ let currentUser=null, saveTimer=null, applyingCloud=false;
+ function status(msg){$('syncStatus').textContent='Статус: '+msg;}
+ async function saveCloud(){
+  if(!currentUser||applyingCloud)return;
+  const snapshot={...state,editing:false};
+  status('сохраняю изменения…');
+  const {error}=await cloud.from('smoking_diary').upsert({
+   user_id:currentUser.id, entry_date:new Date().toISOString().slice(0,10), data:snapshot, updated_at:new Date().toISOString()
+  },{onConflict:'user_id'});
+  if(error){status('ошибка сохранения: '+error.message);return;}
+  status('синхронизировано ✓');
+ }
+ async function loadCloud(){
+  if(!currentUser)return;
+  status('загружаю данные…');
+  const {data,error}=await cloud.from('smoking_diary').select('data').eq('user_id',currentUser.id).maybeSingle();
+  if(error){status('ошибка загрузки: '+error.message);return;}
+  if(data&&data.data&&Array.isArray(data.data.times)&&Array.isArray(data.data.checked)&&Array.isArray(data.data.history)){
+   applyingCloud=true;state={...state,...data.data,editing:false};persistLocalOnly();render();applyingCloud=false;
+   status('загружено из облака ✓');
+  } else {
+   await saveCloud();
+  }
+ }
+ function persistLocalOnly(){try{localStorage.setItem(KEY,JSON.stringify(state));}catch(e){}}
+ async function connectAccount(){
+  const email=$('authEmail').value.trim(),password=$('authPassword').value;
+  if(!email||!password){toast('Введи email и пароль дневника');return;}
+  $('loginBtn').disabled=true;status('выполняю вход…');
+  const {data,error}=await cloud.auth.signInWithPassword({email,password});
+  $('loginBtn').disabled=false;
+  if(error){status('не удалось войти: '+error.message);return;}
+  currentUser=data.user;$('authEmail').disabled=true;$('authPassword').style.display='none';$('loginBtn').style.display='none';$('logoutBtn').style.display='block';
+  await loadCloud();
+ }
+ async function disconnectAccount(){
+  await cloud.auth.signOut();currentUser=null;
+  $('authEmail').disabled=false;$('authPassword').style.display='block';$('loginBtn').style.display='block';$('logoutBtn').style.display='none';
+  status('вышли из аккаунта. Локальная копия осталась на этом устройстве.');
+ }
+ function load(){try{const s=JSON.parse(localStorage.getItem(KEY));if(s&&Array.isArray(s.times)&&Array.isArray(s.checked)&&Array.isArray(s.history))state={...state,...s};}catch(e){}}
+ function persist(){persistLocalOnly();if(currentUser&&!applyingCloud){clearTimeout(saveTimer);saveTimer=setTimeout(()=>saveCloud(),500);}}
+ function toast(msg){const t=$('toast');t.textContent=msg;t.style.display='block';clearTimeout(toast.timer);toast.timer=setTimeout(()=>t.style.display='none',2600);}
+ function safeDate(d){try{return new Date(d+'T12:00:00').toLocaleDateString('ru-RU',{day:'numeric',month:'short',year:'numeric'});}catch(e){return d||'Без даты';}}
+ function renderSchedule(){
+  const root=$('schedule');root.innerHTML='';
+  state.times.forEach((time,i)=>{
+   const row=document.createElement('div');row.className='item'+(state.checked.includes(i)?' done':'');
+   const cb=document.createElement('input');cb.type='checkbox';cb.checked=state.checked.includes(i);cb.setAttribute('aria-label','Отметить сигарету '+(i+1));
+   cb.addEventListener('change',()=>{state.checked=cb.checked?[...new Set([...state.checked,i])]:state.checked.filter(n=>n!==i);persist();render();});
+   row.appendChild(cb);
+   const details=document.createElement('div');details.className='details';
+   if(state.editing){
+    const inp=document.createElement('input');
+    inp.type='time';inp.className='time-edit';inp.value=time||'09:00';
+    inp.setAttribute('aria-label','Время сигареты '+(i+1));
+    inp.style.display='block';inp.style.minHeight='42px';inp.style.color='#17221c';inp.style.background='#fff';
+    inp.addEventListener('input',()=>{state.times[i]=inp.value;persist();});
+    inp.addEventListener('change',()=>{state.times[i]=inp.value;persist();});
+    details.appendChild(inp);
+   } else {
+    const t=document.createElement('span');t.className='time-label';
+    t.textContent=time||'Время не задано';t.style.display='block';t.style.fontSize='17px';t.style.color='#17221c';
+    details.appendChild(t);
+   }
+   const n=document.createElement('span');n.className='num';n.textContent='Сигарета № '+(i+1);details.appendChild(n);row.appendChild(details);
+   if(state.editing){
+    const del=document.createElement('button');
+    del.type='button';del.textContent='Удалить';del.className='outline';
+    del.setAttribute('aria-label','Удалить дополнительное время '+(i+1));
+    del.style.marginLeft='auto';del.style.padding='8px 10px';del.style.fontSize='14px';del.style.flexShrink='0';
+    del.addEventListener('click',()=>{
+     if(state.times.length<=1){toast('Нужно оставить хотя бы одно время');return;}
+     state.times.splice(i,1);
+     state.checked=state.checked.filter(n=>n!==i).map(n=>n>i?n-1:n);
+     persist();renderSchedule();render();
+     toast('Время удалено');
+    });
+    row.appendChild(del);
+   }
+   if(state.checked.includes(i)){const mark=document.createElement('span');mark.textContent='✓';mark.style.color='#27824e';mark.style.fontWeight='800';row.appendChild(mark);}
+   root.appendChild(row);
+  });
+  $('editBtn').textContent=state.editing?'Готово':'Изменить время';
+  $('addTimeBtn').textContent=state.editing?'＋ Добавить ещё одно время':'＋ Добавить дополнительное время';
+ }
+ function render(){
+  state.limit=Math.max(1,Math.min(20,Number(state.limit)||10));
+  const count=state.checked.length,limit=state.limit;
+  $('dateLabel').textContent=safeDate(state.dayStarted);
+  $('smokedCount').textContent=count;$('plannedText').textContent='из '+limit+' запланированных';
+  $('remaining').textContent=Math.max(0,limit-count);$('limitState').textContent=count>limit?'лимит превышен':'сигарет осталось';
+  $('lessCount').textContent=20-count;$('reduction').textContent=Math.round((20-count)/20*100)+'%';
+  $('progressBar').style.width=Math.min(100,count/limit*100)+'%';$('progressText').textContent=count+' из '+limit+' отмечено';
+  $('limitInput').value=limit;$('note').value=state.note||'';
+  renderSchedule();
+  const hist=state.history;const total=hist.reduce((s,d)=>s+d.smoked,0);
+  $('daysCount').textContent=hist.length+' '+(hist.length===1?'день':hist.length>=2&&hist.length<=4?'дня':'дней');
+  $('average').textContent=hist.length?(total/hist.length).toFixed(1).replace('.',','):'—';
+  $('totalDaysSmoked').textContent=total;
+  $('emptyHistory').style.display=hist.length?'none':'block';
+  const list=$('historyList');list.innerHTML='';
+  [...hist].reverse().forEach(d=>{
+   const entry=document.createElement('div');entry.className='history-entry';
+   const head=document.createElement('div');head.className='row';
+   const title=document.createElement('strong');title.textContent=safeDate(d.date)+' · День '+d.day;
+   const pill=document.createElement('span');pill.className='pill'+(d.smoked>d.limit?' over':'');pill.textContent=d.smoked<=d.limit?'Лимит соблюдён':'Лимит превышен';
+   head.append(title,pill);entry.appendChild(head);
+   const p=document.createElement('p');p.textContent='Выкурено: '+d.smoked+' из '+d.limit+' · '+(d.smoked<=20?'на '+(20-d.smoked)+' меньше обычного':'на '+(d.smoked-20)+' больше обычного');entry.appendChild(p);
+   if(d.note){const note=document.createElement('p');note.className='muted';note.textContent='Заметка: '+d.note;entry.appendChild(note);}
+   list.appendChild(entry);
+  });
+ }
+ $('editBtn').addEventListener('click',()=>{state.editing=!state.editing;persist();renderSchedule();$('editBtn').setAttribute('aria-pressed',String(state.editing));toast(state.editing?'Режим редактирования времени включён':'Время сохранено');});
+ $('addTimeBtn').addEventListener('click',()=>{
+  const last=state.times.length?state.times[state.times.length-1]:'09:00';
+  let next='23:00';
+  if(last && /^\\d{2}:\\d{2}$/.test(last)){
+   const mins=Number(last.slice(0,2))*60+Number(last.slice(3))+30;
+   next=mins>=1440?'23:00':String(Math.floor(mins/60)).padStart(2,'0')+':'+String(mins%60).padStart(2,'0');
+  }
+  state.times.push(next);
+  state.editing=true;
+  persist();renderSchedule();render();
+  toast('Добавлено дополнительное время — при необходимости измени его');
+ });
+ $('limitInput').addEventListener('change',()=>{state.limit=Math.max(1,Math.min(20,Number($('limitInput').value)||10));persist();render();});
+ $('note').addEventListener('input',()=>{state.note=$('note').value;persist();});
+ $('resetChecks').addEventListener('click',()=>{if(confirm('Сбросить все отметки за текущий день? История не изменится.')){state.checked=[];persist();render();toast('Отметки сброшены');}});
+ $('saveDay').addEventListener('click',()=>{
+  if(!confirm('Сохранить '+state.checked.length+' сигарет за '+safeDate(state.dayStarted)+' и начать новый день?'))return;
+  state.history.push({day:state.history.length+1,date:state.dayStarted,smoked:state.checked.length,limit:state.limit,note:state.note||''});
+  state.checked=[];state.note='';state.dayStarted=new Date().toISOString().slice(0,10);state.editing=false;persist();render();toast('Итог сохранён. Новый день начат.');
+ });
+ $('exportBtn').addEventListener('click',()=>{
+  const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='dnevnik-kureniya-backup.json';a.click();URL.revokeObjectURL(url);toast('Резервная копия подготовлена');
+ });
+ $('importBtn').addEventListener('click',()=>$('importFile').click());
+ $('importFile').addEventListener('change',async e=>{
+  const f=e.target.files[0];if(!f)return;
+  try{const s=JSON.parse(await f.text());if(!Array.isArray(s.times)||!Array.isArray(s.checked)||!Array.isArray(s.history))throw new Error();if(confirm('Заменить текущие данные данными из файла?')){state={...state,...s};persist();render();toast('Данные импортированы');}}catch(err){alert('Не удалось прочитать файл. Выбери резервную копию этого приложения.');}e.target.value='';
+ });
+ $('clearHistory').addEventListener('click',()=>{if(confirm('Удалить всю сохранённую историю? Это действие нельзя отменить. Рекомендуется сначала сделать экспорт.')){state.history=[];persist();render();toast('История удалена');}});
+ $('loginBtn').addEventListener('click',connectAccount);
+ $('logoutBtn').addEventListener('click',disconnectAccount);
+ cloud.auth.getSession().then(async ({data})=>{if(data.session){currentUser=data.session.user;$('authEmail').value=currentUser.email||'';$('authEmail').disabled=true;$('authPassword').style.display='none';$('loginBtn').style.display='none';$('logoutBtn').style.display='block';await loadCloud();}});
+ load();render();
+})();
+</script>
+</body>
+</html>
