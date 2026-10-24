@@ -1,7 +1,17 @@
 (() => {
  const KEY='smokingDiaryApp_v1';
  const defaultTimes=['09:00','10:30','12:00','13:30','15:00','16:30','18:00','19:30','21:00','22:30'];
- let state={times:defaultTimes,checked:[],limit:10,note:'',history:[],dayStarted:new Date().toISOString().slice(0,10),editing:false};
+
+ function getLocalDate(){
+   const d = new Date();
+   const year = d.getFullYear();
+   const month = String(d.getMonth() + 1).padStart(2, '0');
+   const day = String(d.getDate()).padStart(2, '0');
+   return `${year}-${month}-${day}`;
+ }
+
+ let state={times:defaultTimes,checked:[],limit:10,note:'',history:[],dayStarted:(()=>{const d=new Date();
+ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;})(),editing:false};
  const $=id=>document.getElementById(id);
  const SUPABASE_URL='https://bpdkeogfijpcipauqktv.supabase.co';
  const SUPABASE_KEY='sb_publishable_TCnm7714eDOGW3NrYGD09w_JFu-S4OR';
@@ -13,22 +23,67 @@
   const snapshot={...state,editing:false};
   status('сохраняю изменения…');
   const {error}=await cloud.from('smoking_diary').upsert({
-   user_id:currentUser.id, entry_date:new Date().toISOString().slice(0,10), data:snapshot, updated_at:new Date().toISOString()
+   user_id:currentUser.id, entry_date:getLocalDate(), data:snapshot, updated_at:new Date().toISOString()
   },{onConflict:'user_id'});
   if(error){status('ошибка сохранения: '+error.message);return;}
   status('синхронизировано ✓');
  }
  async function loadCloud(){
-  if(!currentUser)return;
-  status('загружаю данные…');
-  const {data,error}=await cloud.from('smoking_diary').select('data').eq('user_id',currentUser.id).maybeSingle();
-  if(error){status('ошибка загрузки: '+error.message);return;}
-  if(data&&data.data&&Array.isArray(data.data.times)&&Array.isArray(data.data.checked)&&Array.isArray(data.data.history)){
-   applyingCloud=true;state={...state,...data.data,editing:false};persistLocalOnly();render();applyingCloud=false;
-   status('загружено из облака ✓');
-  } else {
-   await saveCloud();
-  }
+   if (!currentUser) return;
+
+   status('загружаю данные…');
+
+   const { data, error } = await cloud
+     .from('smoking_diary')
+     .select('data')
+     .eq('user_id', currentUser.id)
+     .maybeSingle();
+
+   if (error) {
+     status('ошибка загрузки: ' + error.message);
+     return;
+   }
+
+   if (
+     data &&
+     data.data &&
+     Array.isArray(data.data.times) &&
+     Array.isArray(data.data.checked) &&
+     Array.isArray(data.data.history)
+   ) {
+     applyingCloud = true;
+
+     state = { ...state, ...data.data, editing: false };
+
+     const today = getLocalDate();
+
+     if (state.dayStarted && state.dayStarted !== today) {
+       state.history.push({
+         day: state.history.length + 1,
+         date: state.dayStarted,
+         smoked: state.checked.length,
+         limit: state.limit,
+         note: state.note || ''
+       });
+
+       state.checked = [];
+       state.note = '';
+       state.dayStarted = today;
+       state.editing = false;
+     } else if (!state.dayStarted) {
+       state.dayStarted = today;
+     }
+
+     persistLocalOnly();
+     render();
+
+     applyingCloud = false;
+
+     await saveCloud();
+     status('загружено из облака ✓');
+   } else {
+     await saveCloud();
+   }
  }
  function persistLocalOnly(){try{localStorage.setItem(KEY,JSON.stringify(state));}catch(e){}}
  async function connectAccount(){
@@ -46,7 +101,40 @@
   $('authEmail').disabled=false;$('authPassword').style.display='block';$('loginBtn').style.display='block';$('logoutBtn').style.display='none';
   status('вышли из аккаунта. Локальная копия осталась на этом устройстве.');
  }
- function load(){try{const s=JSON.parse(localStorage.getItem(KEY));if(s&&Array.isArray(s.times)&&Array.isArray(s.checked)&&Array.isArray(s.history))state={...state,...s};}catch(e){}}
+ function load(){
+   try {
+     const s = JSON.parse(localStorage.getItem(KEY));
+     if (
+       s &&
+       Array.isArray(s.times) &&
+       Array.isArray(s.checked) &&
+       Array.isArray(s.history)
+     ) {
+       state = { ...state, ...s };
+     }
+   } catch (e) {}
+
+   const today = getLocalDate();
+
+   if (state.dayStarted && state.dayStarted !== today) {
+     state.history.push({
+       day: state.history.length + 1,
+       date: state.dayStarted,
+       smoked: state.checked.length,
+       limit: state.limit,
+       note: state.note || ''
+     });
+
+     state.checked = [];
+     state.note = '';
+     state.dayStarted = today;
+     state.editing = false;
+     persist();
+   } else if (!state.dayStarted) {
+     state.dayStarted = today;
+   }
+ }
+
  function persist(){persistLocalOnly();if(currentUser&&!applyingCloud){clearTimeout(saveTimer);saveTimer=setTimeout(()=>saveCloud(),500);}}
  function toast(msg){const t=$('toast');t.textContent=msg;t.style.display='block';clearTimeout(toast.timer);toast.timer=setTimeout(()=>t.style.display='none',2600);}
  function safeDate(d){try{return new Date(d+'T12:00:00').toLocaleDateString('ru-RU',{day:'numeric',month:'short',year:'numeric'});}catch(e){return d||'Без даты';}}
@@ -138,7 +226,7 @@
  $('saveDay').addEventListener('click',()=>{
   if(!confirm('Сохранить '+state.checked.length+' сигарет за '+safeDate(state.dayStarted)+' и начать новый день?'))return;
   state.history.push({day:state.history.length+1,date:state.dayStarted,smoked:state.checked.length,limit:state.limit,note:state.note||''});
-  state.checked=[];state.note='';state.dayStarted=new Date().toISOString().slice(0,10);state.editing=false;persist();render();toast('Итог сохранён. Новый день начат.');
+  state.checked=[];state.note='';const d=new Date();state.dayStarted=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;state.editing=false;persist();render();toast('Итог сохранён. Новый день начат.');
  });
  $('exportBtn').addEventListener('click',()=>{
   const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='dnevnik-kureniya-backup.json';a.click();URL.revokeObjectURL(url);toast('Резервная копия подготовлена');
