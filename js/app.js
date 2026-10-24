@@ -138,9 +138,51 @@
  function persist(){persistLocalOnly();if(currentUser&&!applyingCloud){clearTimeout(saveTimer);saveTimer=setTimeout(()=>saveCloud(),500);}}
  function toast(msg){const t=$('toast');t.textContent=msg;t.style.display='block';clearTimeout(toast.timer);toast.timer=setTimeout(()=>t.style.display='none',2600);}
  function safeDate(d){try{return new Date(d+'T12:00:00').toLocaleDateString('ru-RU',{day:'numeric',month:'short',year:'numeric'});}catch(e){return d||'Без даты';}}
+
+ function getScheduleTimes() {
+   const times = [...state.times];
+   const checkedIndexes = state.checked
+     .filter(i => i >= 0 && i < times.length)
+     .sort((a, b) => a - b);
+
+   if (checkedIndexes.length === 0) {
+     return times;
+   }
+
+   const lastChecked = checkedIndexes[checkedIndexes.length - 1];
+   let previous = times[lastChecked];
+
+   if (!previous || !/^\d{2}:\d{2}$/.test(previous)) {
+     return times;
+   }
+
+   for (let i = lastChecked + 1; i < times.length; i++) {
+     if (state.checked.includes(i)) {
+       previous = times[i];
+       continue;
+     }
+
+     let minutes =
+       Number(previous.slice(0, 2)) * 60 +
+       Number(previous.slice(3)) + 90;
+
+     minutes %= 1440;
+
+     times[i] =
+       String(Math.floor(minutes / 60)).padStart(2, '0') +
+       ':' +
+       String(minutes % 60).padStart(2, '0');
+
+     previous = times[i];
+   }
+
+   return times;
+ }
+
  function renderSchedule(){
   const root=$('schedule');root.innerHTML='';
-  state.times.forEach((time,i)=>{
+  const scheduleTimes = getScheduleTimes();
+  scheduleTimes.forEach((time,i)=>{
    const row=document.createElement('div');row.className='item'+(state.checked.includes(i)?' done':'');
    const cb=document.createElement('input');cb.type='checkbox';cb.checked=state.checked.includes(i);cb.setAttribute('aria-label','Отметить сигарету '+(i+1));
    cb.addEventListener('change',()=>{state.checked=cb.checked?[...new Set([...state.checked,i])]:state.checked.filter(n=>n!==i);persist();render();});
@@ -151,8 +193,11 @@
     inp.type='time';inp.className='time-edit';inp.value=time||'09:00';
     inp.setAttribute('aria-label','Время сигареты '+(i+1));
     inp.style.display='block';inp.style.minHeight='42px';inp.style.color='#17221c';inp.style.background='#fff';
-    inp.addEventListener('input',()=>{state.times[i]=inp.value;persist();});
-    inp.addEventListener('change',()=>{state.times[i]=inp.value;persist();});
+    inp.addEventListener('change',()=>{
+      state.times[i] = inp.value;
+      persist();
+      renderSchedule();
+    });
     details.appendChild(inp);
    } else {
     const t=document.createElement('span');t.className='time-label';
@@ -228,8 +273,43 @@
   state.history.push({day:state.history.length+1,date:state.dayStarted,smoked:state.checked.length,limit:state.limit,note:state.note||''});
   state.checked=[];state.note='';const d=new Date();state.dayStarted=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;state.editing=false;persist();render();toast('Итог сохранён. Новый день начат.');
  });
- $('exportBtn').addEventListener('click',()=>{
-  const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='dnevnik-kureniya-backup.json';a.click();URL.revokeObjectURL(url);toast('Резервная копия подготовлена');
+ $('exportBtn').addEventListener('click', () => {
+   const rows = [
+     ['Дата', 'День', 'Выкурено', 'Лимит', 'Заметка'],
+     [
+       state.dayStarted,
+       'Текущий день',
+       state.checked.length,
+       state.limit,
+       state.note || ''
+     ],
+     ...state.history.map(day => [
+       day.date,
+       day.day,
+       day.smoked,
+       day.limit,
+       day.note || ''
+     ])
+   ];
+
+   const csv = '\uFEFF' + rows
+     .map(row => row.map(value =>
+       '"' + String(value).replace(/"/g, '""') + '"'
+     ).join(';'))
+     .join('\r\n');
+
+   const blob = new Blob([csv], {
+     type: 'text/csv;charset=utf-8;'
+   });
+
+   const url = URL.createObjectURL(blob);
+   const a = document.createElement('a');
+   a.href = url;
+   a.download = 'dnevnik-kureniya-statistika.csv';
+   a.click();
+
+   setTimeout(() => URL.revokeObjectURL(url), 1000);
+   toast('Статистика экспортирована в CSV');
  });
  $('importBtn').addEventListener('click',()=>$('importFile').click());
  $('importFile').addEventListener('change',async e=>{
