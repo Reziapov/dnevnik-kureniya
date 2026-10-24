@@ -139,45 +139,11 @@
  function toast(msg){const t=$('toast');t.textContent=msg;t.style.display='block';clearTimeout(toast.timer);toast.timer=setTimeout(()=>t.style.display='none',2600);}
  function safeDate(d){try{return new Date(d+'T12:00:00').toLocaleDateString('ru-RU',{day:'numeric',month:'short',year:'numeric'});}catch(e){return d||'Без даты';}}
 
- function getScheduleTimes() {
-   const times = [...state.times];
-   const checkedIndexes = state.checked
-     .filter(i => i >= 0 && i < times.length)
-     .sort((a, b) => a - b);
 
-   if (checkedIndexes.length === 0) {
-     return times;
-   }
+function getScheduleTimes() {
+  return [...state.times];
+}
 
-   const lastChecked = checkedIndexes[checkedIndexes.length - 1];
-   let previous = times[lastChecked];
-
-   if (!previous || !/^\d{2}:\d{2}$/.test(previous)) {
-     return times;
-   }
-
-   for (let i = lastChecked + 1; i < times.length; i++) {
-     if (state.checked.includes(i)) {
-       previous = times[i];
-       continue;
-     }
-
-     let minutes =
-       Number(previous.slice(0, 2)) * 60 +
-       Number(previous.slice(3)) + 90;
-
-     minutes %= 1440;
-
-     times[i] =
-       String(Math.floor(minutes / 60)).padStart(2, '0') +
-       ':' +
-       String(minutes % 60).padStart(2, '0');
-
-     previous = times[i];
-   }
-
-   return times;
- }
 
  function renderSchedule(){
   const root=$('schedule');root.innerHTML='';
@@ -185,7 +151,42 @@
   scheduleTimes.forEach((time,i)=>{
    const row=document.createElement('div');row.className='item'+(state.checked.includes(i)?' done':'');
    const cb=document.createElement('input');cb.type='checkbox';cb.checked=state.checked.includes(i);cb.setAttribute('aria-label','Отметить сигарету '+(i+1));
-   cb.addEventListener('change',()=>{state.checked=cb.checked?[...new Set([...state.checked,i])]:state.checked.filter(n=>n!==i);persist();render();});
+
+cb.addEventListener('change', () => {
+  state.checked = cb.checked
+    ? [...new Set([...state.checked, i])]
+    : state.checked.filter(n => n !== i);
+
+  if (cb.checked) {
+    const actualTime = new Date();
+    state.times[i] =
+      String(actualTime.getHours()).padStart(2, '0') + ':' +
+      String(actualTime.getMinutes()).padStart(2, '0');
+
+    let previous = state.times[i];
+
+    for (let j = i + 1; j < state.times.length; j++) {
+      if (state.checked.includes(j)) {
+        previous = state.times[j];
+        continue;
+      }
+
+      const minutes =
+        (Number(previous.slice(0, 2)) * 60 +
+         Number(previous.slice(3)) + 90) % 1440;
+
+      state.times[j] =
+        String(Math.floor(minutes / 60)).padStart(2, '0') + ':' +
+        String(minutes % 60).padStart(2, '0');
+
+      previous = state.times[j];
+    }
+  }
+
+  persist();
+  render();
+});
+
    row.appendChild(cb);
    const details=document.createElement('div');details.className='details';
    if(state.editing){
@@ -193,8 +194,39 @@
     inp.type='time';inp.className='time-edit';inp.value=time||'09:00';
     inp.setAttribute('aria-label','Время сигареты '+(i+1));
     inp.style.display='block';inp.style.minHeight='42px';inp.style.color='#17221c';inp.style.background='#fff';
-    inp.addEventListener('change',()=>{
-      state.times[i] = inp.value;
+    inp.addEventListener('change', () => {
+      const newTime = inp.value;
+
+      if (!newTime) return;
+
+      state.times[i] = newTime;
+
+      let previous = newTime;
+
+      for (let j = i + 1; j < state.times.length; j++) {
+        if (state.checked.includes(j)) {
+          previous = state.times[j];
+          continue;
+        }
+
+        if (!previous || !/^\d{2}:\d{2}$/.test(previous)) {
+          continue;
+        }
+
+        let minutes =
+          Number(previous.slice(0, 2)) * 60 +
+          Number(previous.slice(3)) + 90;
+
+        minutes %= 1440;
+
+        state.times[j] =
+          String(Math.floor(minutes / 60)).padStart(2, '0') +
+          ':' +
+          String(minutes % 60).padStart(2, '0');
+
+        previous = state.times[j];
+      }
+
       persist();
       renderSchedule();
     });
