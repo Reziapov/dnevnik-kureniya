@@ -58,6 +58,24 @@
   <div class="stat"><small>Среднее за день</small><strong id="average">—</strong><small>сигарет</small></div>
   <div class="stat"><small>Всего учтено</small><strong id="totalDaysSmoked">0</strong><small>сигарет в истории</small></div>
  </div>
+ <div class="chart-section">
+  <h3>График выкуренных сигарет</h3>
+  <label class="chart-period-label" for="chartPeriod">Период графика</label>
+  <select id="chartPeriod" class="chart-period">
+   <option value="7">Последние 7 дней</option>
+   <option value="14">Последние 14 дней</option>
+   <option value="30">Последние 30 дней</option>
+   <option value="months">По месяцам</option>
+   <option value="years">По годам</option>
+  </select>
+  <div id="smokingChart" class="smoking-chart" role="img" aria-label="Диаграмма выкуренных сигарет"></div>
+  <div class="chart-legend">
+   <span><i class="legend-swatch legend-blue"></i>В пределах лимита</span>
+   <span><i class="legend-swatch legend-orange"></i>Сверх лимита</span>
+   <span><i class="legend-dash"></i>Лимит</span>
+  </div>
+  <p id="chartCaption" class="muted chart-caption">Для дней показано количество сигарет и дневной лимит.</p>
+ </div>
  <div id="historyList"></div>
  <p id="emptyHistory" class="muted" style="font-size:14px">Пока нет завершённых дней. Сохрани первый итог — здесь появится история.</p>
  <div class="button-row" style="margin-top:12px"><button class="outline" id="exportBtn">Экспорт данных</button><button class="outline" id="importBtn">Импорт данных</button></div>

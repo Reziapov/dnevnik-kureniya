@@ -354,6 +354,126 @@
         $('addTimeBtn').textContent = state.editing ? '＋ Добавить ещё одно время' : '＋ Добавить дополнительное время';
     }
 
+    function renderSmokingChart() {
+        const root = $('smokingChart');
+        const periodSelect = $('chartPeriod');
+        if (!root || !periodSelect) return;
+
+        const today = getLocalDate();
+        const byDate = new Map();
+        (state.history || []).forEach(d => {
+            if (d.date && Number.isFinite(Number(d.smoked))) {
+                byDate.set(d.date, {
+                    date: d.date,
+                    smoked: Math.max(0, Number(d.smoked) || 0),
+                    limit: Math.max(1, Number(d.limit) || 10)
+                });
+            }
+        });
+        byDate.set(state.dayStarted || today, {
+            date: state.dayStarted || today,
+            smoked: Math.max(0, state.checked.length),
+            limit: Math.max(1, Number(state.limit) || 10)
+        });
+
+        const allDays = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+        const period = periodSelect.value || '7';
+        let items = [];
+        let caption = '';
+
+        if (period === '7' || period === '14' || period === '30') {
+            const count = Number(period);
+            const end = new Date(today + 'T12:00:00');
+            const start = new Date(end);
+            start.setDate(start.getDate() - count + 1);
+            for (let i = 0; i < count; i++) {
+                const d = new Date(start);
+                d.setDate(start.getDate() + i);
+                const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                const saved = byDate.get(key);
+                items.push({
+                    label: `${d.getDate()}.${String(d.getMonth() + 1).padStart(2, '0')}`,
+                    smoked: saved ? saved.smoked : 0,
+                    limit: saved ? saved.limit : (Number(state.limit) || 10),
+                    date: key
+                });
+            }
+            caption = `Каждый столбик — отдельный календарный день за последние ${count} дней.`;
+        } else {
+            const groups = new Map();
+            allDays.forEach(d => {
+                const key = period === 'months' ? d.date.slice(0, 7) : d.date.slice(0, 4);
+                if (!groups.has(key)) groups.set(key, {sum: 0, limitSum: 0, days: 0});
+                const g = groups.get(key);
+                g.sum += d.smoked;
+                g.limitSum += d.limit;
+                g.days += 1;
+            });
+            let keys = [...groups.keys()].sort();
+            if (period === 'months') keys = keys.slice(-12);
+            items = keys.map(key => {
+                const g = groups.get(key);
+                const average = g.days ? g.sum / g.days : 0;
+                const averageLimit = g.days ? g.limitSum / g.days : (Number(state.limit) || 10);
+                return {
+                    label: period === 'months' ? key.slice(5) + '.' + key.slice(2, 4) : key,
+                    smoked: average,
+                    limit: averageLimit,
+                    total: g.sum,
+                    days: g.days
+                };
+            });
+            caption = period === 'months'
+                ? 'По месяцам показано среднее за день (до 12 последних месяцев); число над столбиком — среднее, с одним знаком после запятой.'
+                : 'По годам показано среднее за день; число над столбиком — среднее, с одним знаком после запятой.';
+        }
+
+        if (!items.length) {
+            root.innerHTML = '<p class="muted">Пока недостаточно данных для графика.</p>';
+            $('chartCaption').textContent = caption;
+            return;
+        }
+
+        const width = Math.max(320, items.length * (period === '7' ? 42 : period === '14' ? 30 : period === '30' ? 22 : 48));
+        const height = 220, left = 30, right = 8, top = 24, bottom = 35;
+        const plotH = height - top - bottom;
+        const maxValue = Math.max(1, ...items.map(d => Math.max(d.smoked, d.limit)));
+        const scaleMax = Math.ceil(maxValue * 1.15);
+        const y = value => top + plotH - (value / scaleMax) * plotH;
+        const slot = (width - left - right) / items.length;
+        const barW = Math.max(5, Math.min(24, slot * 0.58));
+        const averageLimit = items.reduce((sum, d) => sum + d.limit, 0) / items.length;
+        const limitLines = `<line x1="${left}" y1="${y(averageLimit)}" x2="${width-right}" y2="${y(averageLimit)}" stroke="#6c7370" stroke-width="1.5" stroke-dasharray="5 4"/>`;
+        const bars = items.map((d, i) => {
+            const cx = left + i * slot + slot / 2;
+            const baseY = top + plotH;
+            const blueValue = Math.min(d.smoked, d.limit);
+            const orangeValue = Math.max(0, d.smoked - d.limit);
+            const blueH = blueValue / scaleMax * plotH;
+            const orangeH = orangeValue / scaleMax * plotH;
+            const blueY = baseY - blueH;
+            const orangeY = blueY - orangeH;
+            const totalLabel = period === 'months' || period === 'years'
+                ? d.smoked.toFixed(1).replace('.', ',')
+                : String(d.smoked);
+            const labelY = Math.max(12, y(d.smoked) - 5);
+            const title = `${d.label}: ${totalLabel} сигарет в среднем за день, лимит ${d.limit.toFixed(1).replace('.', ',')}`;
+            return `<g><title>${title}</title>
+              ${blueH > 0 ? `<rect x="${cx - barW/2}" y="${blueY}" width="${barW}" height="${blueH}" rx="2" fill="#367bd6"/>` : ''}
+              ${orangeH > 0 ? `<rect x="${cx - barW/2}" y="${orangeY}" width="${barW}" height="${orangeH}" rx="2" fill="#f39a38"/>` : ''}
+              <text x="${cx}" y="${labelY}" text-anchor="middle" font-size="${items.length > 20 ? 9 : 10}" fill="#17221c">${totalLabel}</text>
+              <text x="${cx}" y="${height - 13}" text-anchor="middle" font-size="${items.length > 20 ? 8 : 10}" fill="#66736b">${d.label}</text>
+            </g>`;
+        }).join('');
+        const grid = [0, .25, .5, .75, 1].map(f => {
+            const value = scaleMax * f, yy = y(value);
+            return `<g><line x1="${left}" y1="${yy}" x2="${width-right}" y2="${yy}" stroke="#e1e8e3" stroke-width="1"/><text x="${left-5}" y="${yy+3}" text-anchor="end" font-size="9" fill="#66736b">${Math.round(value)}</text></g>`;
+        }).join('');
+
+        root.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Столбчатая диаграмма количества сигарет">${grid}${limitLines}${bars}</svg>`;
+        $('chartCaption').textContent = caption;
+    }
+
     function render() {
         state.limit = Math.max(1, Math.min(20, Number(state.limit) || 10));
         const count = state.checked.length, limit = state.limit;
@@ -400,7 +520,10 @@
             }
             list.appendChild(entry);
         });
+        renderSmokingChart();
     }
+
+    $('chartPeriod').addEventListener('change', renderSmokingChart);
 
     $('editBtn').addEventListener('click', () => {
         state.editing = !state.editing;
