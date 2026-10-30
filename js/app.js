@@ -51,47 +51,8 @@
         status('синхронизировано ✓');
     }
 
-    // Объединяем старые записи одной календарной даты.
-    // Например, записи 17 и 0 сигарет за 28 октября станут одной записью: 17.
-    function normalizeHistoryByDate() {
-        const byDate = new Map();
-
-        (state.history || []).forEach(item => {
-            if (!item || !item.date) return;
-
-            const smoked = Math.max(0, Number(item.smoked) || 0);
-            const limit = Math.max(1, Number(item.limit) || 10);
-            const existing = byDate.get(item.date);
-
-            if (existing) {
-                existing.smoked += smoked;
-                existing.limit = Math.max(existing.limit, limit);
-
-                if (item.note && !existing.notes.includes(item.note)) {
-                    existing.notes.push(item.note);
-                }
-            } else {
-                byDate.set(item.date, {
-                    date: item.date,
-                    smoked,
-                    limit,
-                    notes: item.note ? [item.note] : []
-                });
-            }
-        });
-
-        state.history = [...byDate.values()]
-            .sort((a, b) => a.date.localeCompare(b.date))
-            .map((item, index) => ({
-                day: index + 1,
-                date: item.date,
-                smoked: item.smoked,
-                limit: item.limit,
-                note: item.notes.join(' | ')
-            }));
-    }
-
-    // Автоматически сохраняем прошедший день, но не создаём пустую запись.
+    // Автоматически сохраняем прошедший день,
+    // но не создаём пустую запись.
     function archiveCurrentDayIfHasData() {
         if (state.checked.length === 0 && !(state.note || '').trim()) {
             return;
@@ -104,18 +65,6 @@
             limit: state.limit,
             note: state.note || ''
         });
-
-        normalizeHistoryByDate();
-        persistLocalOnly();
-    }
-
-    // Следующая дата учёта — следующий календарный день относительно текущей
-    // даты учёта, а не обязательно сегодняшняя дата устройства.
-    function getNextDiaryDate(dateString) {
-        const d = new Date((dateString || getLocalDate()) + 'T12:00:00');
-        d.setDate(d.getDate() + 1);
-
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     }
 
     async function loadCloud() {
@@ -144,11 +93,10 @@
             applyingCloud = true;
 
             state = {...state, ...data.data, editing: false};
-            normalizeHistoryByDate();
 
             const today = getLocalDate();
 
-            if (state.dayStarted && state.dayStarted < today) {
+            if (state.dayStarted && state.dayStarted !== today) {
                 archiveCurrentDayIfHasData();
 
                 state.checked = [];
@@ -237,13 +185,11 @@
                 state = {...state, ...s};
             }
         } catch (e) {
-
         }
 
-        normalizeHistoryByDate();
         const today = getLocalDate();
 
-        if (state.dayStarted && state.dayStarted < today) {
+        if (state.dayStarted && state.dayStarted !== today) {
             archiveCurrentDayIfHasData();
 
             state.checked = [];
@@ -511,581 +457,584 @@
                 }
             }
         });
-                // Добавляем текущий день.
-                // Если за эту дату уже есть записи в истории,
-                // добавляем к ним текущие отметки.
-                const currentDate = state.dayStarted || today;
-                const currentSmoked = Math.max(0, state.checked.length);
-                const currentLimit = Math.max(1, Number(state.limit) || 10);
 
-                const existingCurrent = byDate.get(currentDate);
+        // Добавляем текущий день.
+        // Если за эту дату уже есть записи в истории,
+        // добавляем к ним текущие отметки.
+        const currentDate = state.dayStarted || today;
+        const currentSmoked = Math.max(0, state.checked.length);
+        const currentLimit = Math.max(1, Number(state.limit) || 10);
 
-                if (existingCurrent) {
-                    existingCurrent.smoked += currentSmoked;
-                    existingCurrent.limit = Math.max(existingCurrent.limit, currentLimit);
-                } else {
-                    byDate.set(currentDate, {
-                        date: currentDate,
-                        smoked: currentSmoked,
-                        limit: currentLimit
+        const existingCurrent = byDate.get(currentDate);
+
+        if (existingCurrent) {
+            existingCurrent.smoked += currentSmoked;
+            existingCurrent.limit = Math.max(existingCurrent.limit, currentLimit);
+        } else {
+            byDate.set(currentDate, {
+                date: currentDate,
+                smoked: currentSmoked,
+                limit: currentLimit
+            });
+        }
+
+        const allDays = [...byDate.values()].sort((a, b) =>
+            a.date.localeCompare(b.date)
+        );
+
+        const period = periodSelect.value || '7';
+
+        let items = [];
+        let caption = '';
+
+        if (period === '7' || period === '14' || period === '30') {
+            const count = Number(period);
+
+            const end = new Date(today + 'T12:00:00');
+            const start = new Date(end);
+
+            start.setDate(start.getDate() - count + 1);
+
+            for (let i = 0; i < count; i++) {
+                const d = new Date(start);
+
+                d.setDate(start.getDate() + i);
+
+                const key =
+                    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+                const saved = byDate.get(key);
+
+                items.push({
+                    label: `${d.getDate()}.${String(d.getMonth() + 1).padStart(2, '0')}`,
+                    smoked: saved ? saved.smoked : 0,
+                    limit: saved ? saved.limit : (Number(state.limit) || 10),
+                    date: key
+                });
+            }
+
+            caption = `Каждый столбик — отдельный календарный день за последние ${count} дней.`;
+        } else {
+            const groups = new Map();
+
+            allDays.forEach(d => {
+                const key = period === 'months'
+                    ? d.date.slice(0, 7)
+                    : d.date.slice(0, 4);
+
+                if (!groups.has(key)) {
+                    groups.set(key, {
+                        sum: 0,
+                        limitSum: 0,
+                        days: 0
                     });
                 }
 
-                const allDays = [...byDate.values()].sort((a, b) =>
-                    a.date.localeCompare(b.date)
-                );
+                const g = groups.get(key);
 
-                const period = periodSelect.value || '7';
+                g.sum += d.smoked;
+                g.limitSum += d.limit;
+                g.days += 1;
+            });
 
-                let items = [];
-                let caption = '';
+            let keys = [...groups.keys()].sort();
 
-                if (period === '7' || period === '14' || period === '30') {
-                    const count = Number(period);
+            if (period === 'months') {
+                keys = keys.slice(-12);
+            }
 
-                    const end = new Date(today + 'T12:00:00');
-                    const start = new Date(end);
+            items = keys.map(key => {
+                const g = groups.get(key);
 
-                    start.setDate(start.getDate() - count + 1);
+                const average = g.days ? g.sum / g.days : 0;
 
-                    for (let i = 0; i < count; i++) {
-                        const d = new Date(start);
+                const averageLimit = g.days
+                    ? g.limitSum / g.days
+                    : (Number(state.limit) || 10);
 
-                        d.setDate(start.getDate() + i);
+                return {
+                    label: period === 'months'
+                        ? key.slice(5) + '.' + key.slice(2, 4)
+                        : key,
+                    smoked: average,
+                    limit: averageLimit,
+                    total: g.sum,
+                    days: g.days
+                };
+            });
 
-                        const key =
-                            `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+            caption = period === 'months'
+                ? 'По месяцам показано среднее за день (до 12 последних месяцев); число над столбиком — среднее, с одним знаком после запятой.'
+                : 'По годам показано среднее за день; число над столбиком — среднее, с одним знаком после запятой.';
+        }
 
-                        const saved = byDate.get(key);
+        if (!items.length) {
+            root.innerHTML = '<p class="muted">Пока недостаточно данных для графика.</p>';
+            $('chartCaption').textContent = caption;
+            return;
+        }
 
-                        items.push({
-                            label: `${d.getDate()}.${String(d.getMonth() + 1).padStart(2, '0')}`,
-                            smoked: saved ? saved.smoked : 0,
-                            limit: saved ? saved.limit : (Number(state.limit) || 10),
-                            date: key
-                        });
+        const width = Math.max(
+            320,
+            items.length * (
+                period === '7' ? 42 :
+                period === '14' ? 30 :
+                period === '30' ? 22 : 48
+            )
+        );
+
+        const height = 220;
+        const left = 30;
+        const right = 8;
+        const top = 24;
+        const bottom = 35;
+
+        const plotH = height - top - bottom;
+
+        const maxValue = Math.max(
+            1,
+            ...items.map(d => Math.max(d.smoked, d.limit))
+        );
+
+        const scaleMax = Math.ceil(maxValue * 1.15);
+
+        const y = value =>
+            top + plotH - (value / scaleMax) * plotH;
+
+        const slot = (width - left - right) / items.length;
+
+        const barW = Math.max(5, Math.min(24, slot * 0.58));
+
+        const averageLimit =
+            items.reduce((sum, d) => sum + d.limit, 0) / items.length;
+
+        const limitLines = `
+            <line
+                x1="${left}"
+                y1="${y(averageLimit)}"
+                x2="${width - right}"
+                y2="${y(averageLimit)}"
+                stroke="#6c7370"
+                stroke-width="1.5"
+                stroke-dasharray="5 4"
+            />
+        `;
+
+        const bars = items.map((d, i) => {
+            const cx = left + i * slot + slot / 2;
+            const baseY = top + plotH;
+
+            const blueValue = Math.min(d.smoked, d.limit);
+            const orangeValue = Math.max(0, d.smoked - d.limit);
+
+            const blueH = blueValue / scaleMax * plotH;
+            const orangeH = orangeValue / scaleMax * plotH;
+
+            const blueY = baseY - blueH;
+            const orangeY = blueY - orangeH;
+
+            const totalLabel =
+                period === 'months' || period === 'years'
+                    ? d.smoked.toFixed(1).replace('.', ',')
+                    : String(d.smoked);
+
+            const labelY = Math.max(12, y(d.smoked) - 5);
+
+            const title =
+                `${d.label}: ${totalLabel} сигарет в среднем за день, лимит ${d.limit.toFixed(1).replace('.', ',')}`;
+
+            return `
+                <g>
+                    <title>${title}</title>
+
+                    ${blueH > 0
+                        ? `<rect x="${cx - barW / 2}" y="${blueY}" width="${barW}" height="${blueH}" rx="2" fill="#367bd6"/>`
+                        : ''
                     }
 
-                    caption = `Каждый столбик — отдельный календарный день за последние ${count} дней.`;
-                } else {
-                    const groups = new Map();
-
-                    allDays.forEach(d => {
-                        const key = period === 'months'
-                            ? d.date.slice(0, 7)
-                            : d.date.slice(0, 4);
-
-                        if (!groups.has(key)) {
-                            groups.set(key, {
-                                sum: 0,
-                                limitSum: 0,
-                                days: 0
-                            });
-                        }
-
-                        const g = groups.get(key);
-
-                        g.sum += d.smoked;
-                        g.limitSum += d.limit;
-                        g.days += 1;
-                    });
-
-                    let keys = [...groups.keys()].sort();
-
-                    if (period === 'months') {
-                        keys = keys.slice(-12);
+                    ${orangeH > 0
+                        ? `<rect x="${cx - barW / 2}" y="${orangeY}" width="${barW}" height="${orangeH}" rx="2" fill="#f39a38"/>`
+                        : ''
                     }
 
-                    items = keys.map(key => {
-                        const g = groups.get(key);
+                    <text
+                        x="${cx}"
+                        y="${labelY}"
+                        text-anchor="middle"
+                        font-size="${items.length > 20 ? 9 : 10}"
+                        fill="#17221c"
+                    >${totalLabel}</text>
 
-                        const average = g.days ? g.sum / g.days : 0;
+                    <text
+                        x="${cx}"
+                        y="${height - 13}"
+                        text-anchor="middle"
+                        font-size="${items.length > 20 ? 8 : 10}"
+                        fill="#66736b"
+                    >${d.label}</text>
+                </g>
+            `;
+        }).join('');
 
-                        const averageLimit = g.days
-                            ? g.limitSum / g.days
-                            : (Number(state.limit) || 10);
+        const grid = [0, .25, .5, .75, 1].map(f => {
+            const value = scaleMax * f;
+            const yy = y(value);
 
-                        return {
-                            label: period === 'months'
-                                ? key.slice(5) + '.' + key.slice(2, 4)
-                                : key,
-                            smoked: average,
-                            limit: averageLimit,
-                            total: g.sum,
-                            days: g.days
-                        };
-                    });
-
-                    caption = period === 'months'
-                        ? 'По месяцам показано среднее за день (до 12 последних месяцев); число над столбиком — среднее, с одним знаком после запятой.'
-                        : 'По годам показано среднее за день; число над столбиком — среднее, с одним знаком после запятой.';
-                }
-
-                if (!items.length) {
-                    root.innerHTML = '<p class="muted">Пока недостаточно данных для графика.</p>';
-                    $('chartCaption').textContent = caption;
-                    return;
-                }
-
-                const width = Math.max(
-                    320,
-                    items.length * (
-                        period === '7' ? 42 :
-                        period === '14' ? 30 :
-                        period === '30' ? 22 : 48
-                    )
-                );
-
-                const height = 220;
-                const left = 30;
-                const right = 8;
-                const top = 24;
-                const bottom = 35;
-
-                const plotH = height - top - bottom;
-
-                const maxValue = Math.max(
-                    1,
-                    ...items.map(d => Math.max(d.smoked, d.limit))
-                );
-
-                const scaleMax = Math.ceil(maxValue * 1.15);
-
-                const y = value =>
-                    top + plotH - (value / scaleMax) * plotH;
-
-                const slot = (width - left - right) / items.length;
-
-                const barW = Math.max(5, Math.min(24, slot * 0.58));
-
-                const averageLimit =
-                    items.reduce((sum, d) => sum + d.limit, 0) / items.length;
-
-                const limitLines = `
+            return `
+                <g>
                     <line
                         x1="${left}"
-                        y1="${y(averageLimit)}"
+                        y1="${yy}"
                         x2="${width - right}"
-                        y2="${y(averageLimit)}"
-                        stroke="#6c7370"
-                        stroke-width="1.5"
-                        stroke-dasharray="5 4"
+                        y2="${yy}"
+                        stroke="#e1e8e3"
+                        stroke-width="1"
                     />
-                `;
 
-                const bars = items.map((d, i) => {
-                    const cx = left + i * slot + slot / 2;
-                    const baseY = top + plotH;
+                    <text
+                        x="${left - 5}"
+                        y="${yy + 3}"
+                        text-anchor="end"
+                        font-size="9"
+                        fill="#66736b"
+                    >${Math.round(value)}</text>
+                </g>
+            `;
+        }).join('');
 
-                    const blueValue = Math.min(d.smoked, d.limit);
-                    const orangeValue = Math.max(0, d.smoked - d.limit);
+        root.innerHTML = `
+            <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 ${width} ${height}"
+                role="img"
+                aria-label="Столбчатая диаграмма количества сигарет"
+            >
+                ${grid}
+                ${limitLines}
+                ${bars}
+            </svg>
+        `;
 
-                    const blueH = blueValue / scaleMax * plotH;
-                    const orangeH = orangeValue / scaleMax * plotH;
+        $('chartCaption').textContent = caption;
+    }
 
-                    const blueY = baseY - blueH;
-                    const orangeY = blueY - orangeH;
+    function render() {
+        state.limit = Math.max(1, Math.min(20, Number(state.limit) || 10));
 
-                    const totalLabel =
-                        period === 'months' || period === 'years'
-                            ? d.smoked.toFixed(1).replace('.', ',')
-                            : String(d.smoked);
+        const count = state.checked.length;
+        const limit = state.limit;
 
-                    const labelY = Math.max(12, y(d.smoked) - 5);
+        $('dateLabel').textContent = safeDate(state.dayStarted);
+        $('smokedCount').textContent = count;
+        $('plannedText').textContent = 'из ' + limit + ' запланированных';
+        $('remaining').textContent = Math.max(0, limit - count);
+        $('limitState').textContent = count > limit
+            ? 'лимит превышен'
+            : 'сигарет осталось';
 
-                    const title =
-                        `${d.label}: ${totalLabel} сигарет в среднем за день, лимит ${d.limit.toFixed(1).replace('.', ',')}`;
+        $('lessCount').textContent = 20 - count;
 
-                    return `
-                        <g>
-                            <title>${title}</title>
+        $('reduction').textContent =
+            Math.round((20 - count) / 20 * 100) + '%';
 
-                            ${blueH > 0
-                                ? `<rect x="${cx - barW / 2}" y="${blueY}" width="${barW}" height="${blueH}" rx="2" fill="#367bd6"/>`
-                                : ''
-                            }
+        $('progressBar').style.width =
+            Math.min(100, count / limit * 100) + '%';
 
-                            ${orangeH > 0
-                                ? `<rect x="${cx - barW / 2}" y="${orangeY}" width="${barW}" height="${orangeH}" rx="2" fill="#f39a38"/>`
-                                : ''
-                            }
+        $('progressText').textContent = count + ' из ' + limit + ' отмечено';
 
-                            <text
-                                x="${cx}"
-                                y="${labelY}"
-                                text-anchor="middle"
-                                font-size="${items.length > 20 ? 9 : 10}"
-                                fill="#17221c"
-                            >${totalLabel}</text>
+        $('limitInput').value = limit;
+        $('note').value = state.note || '';
 
-                            <text
-                                x="${cx}"
-                                y="${height - 13}"
-                                text-anchor="middle"
-                                font-size="${items.length > 20 ? 8 : 10}"
-                                fill="#66736b"
-                            >${d.label}</text>
-                        </g>
-                    `;
-                }).join('');
+        renderSchedule();
 
-                const grid = [0, .25, .5, .75, 1].map(f => {
-                    const value = scaleMax * f;
-                    const yy = y(value);
+        const hist = state.history;
 
-                    return `
-                        <g>
-                            <line
-                                x1="${left}"
-                                y1="${yy}"
-                                x2="${width - right}"
-                                y2="${yy}"
-                                stroke="#e1e8e3"
-                                stroke-width="1"
-                            />
+        const total = hist.reduce((s, d) => s + d.smoked, 0);
 
-                            <text
-                                x="${left - 5}"
-                                y="${yy + 3}"
-                                text-anchor="end"
-                                font-size="9"
-                                fill="#66736b"
-                            >${Math.round(value)}</text>
-                        </g>
-                    `;
-                }).join('');
+        $('daysCount').textContent =
+            hist.length + ' ' +
+            (hist.length === 1
+                ? 'день'
+                : hist.length >= 2 && hist.length <= 4
+                    ? 'дня'
+                    : 'дней');
 
-                root.innerHTML = `
-                    <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 ${width} ${height}"
-                        role="img"
-                        aria-label="Столбчатая диаграмма количества сигарет"
-                    >
-                        ${grid}
-                        ${limitLines}
-                        ${bars}
-                    </svg>
-                `;
+        $('average').textContent = hist.length
+            ? (total / hist.length).toFixed(1).replace('.', ',')
+            : '—';
 
-                $('chartCaption').textContent = caption;
+        $('totalDaysSmoked').textContent = total;
+
+        $('emptyHistory').style.display =
+            hist.length ? 'none' : 'block';
+
+        const list = $('historyList');
+
+        list.innerHTML = '';
+
+        [...hist].reverse().forEach(d => {
+            const entry = document.createElement('div');
+
+            entry.className = 'history-entry';
+
+            const head = document.createElement('div');
+
+            head.className = 'row';
+
+            const title = document.createElement('strong');
+
+            title.textContent = safeDate(d.date) + ' · День ' + d.day;
+
+            const pill = document.createElement('span');
+
+            pill.className =
+                'pill' + (d.smoked > d.limit ? ' over' : '');
+
+            pill.textContent = d.smoked <= d.limit
+                ? 'Лимит соблюдён'
+                : 'Лимит превышен';
+
+            head.append(title, pill);
+
+            entry.appendChild(head);
+
+            const p = document.createElement('p');
+
+            p.textContent =
+                'Выкурено: ' + d.smoked + ' из ' + d.limit +
+                ' · ' +
+                (d.smoked <= 20
+                    ? 'на ' + (20 - d.smoked) + ' меньше обычного'
+                    : 'на ' + (d.smoked - 20) + ' больше обычного');
+
+            entry.appendChild(p);
+
+            if (d.note) {
+                const note = document.createElement('p');
+
+                note.className = 'muted';
+                note.textContent = 'Заметка: ' + d.note;
+
+                entry.appendChild(note);
             }
 
-            function render() {
-                state.limit = Math.max(1, Math.min(20, Number(state.limit) || 10));
+            list.appendChild(entry);
+        });
 
-                const count = state.checked.length;
-                const limit = state.limit;
+        renderSmokingChart();
+    }
 
-                $('dateLabel').textContent = safeDate(state.dayStarted);
-                $('smokedCount').textContent = count;
-                $('plannedText').textContent = 'из ' + limit + ' запланированных';
-                $('remaining').textContent = Math.max(0, limit - count);
-                $('limitState').textContent = count > limit
-                    ? 'лимит превышен'
-                    : 'сигарет осталось';
+    $('chartPeriod').addEventListener('change', renderSmokingChart);
 
-                $('lessCount').textContent = 20 - count;
+    $('editBtn').addEventListener('click', () => {
+        state.editing = !state.editing;
 
-                $('reduction').textContent =
-                    Math.round((20 - count) / 20 * 100) + '%';
+        persist();
+        renderSchedule();
 
-                $('progressBar').style.width =
-                    Math.min(100, count / limit * 100) + '%';
+        $('editBtn').setAttribute('aria-pressed', String(state.editing));
 
-                $('progressText').textContent = count + ' из ' + limit + ' отмечено';
+        toast(state.editing
+            ? 'Режим редактирования времени включён'
+            : 'Время сохранено');
+    });
 
-                $('limitInput').value = limit;
-                $('note').value = state.note || '';
+    $('addTimeBtn').addEventListener('click', () => {
+        const last = state.times.length
+            ? state.times[state.times.length - 1]
+            : '09:00';
 
-                renderSchedule();
+        let next = '23:00';
 
-                const hist = state.history;
+        if (last && /^\d{2}:\d{2}$/.test(last)) {
+            const mins =
+                Number(last.slice(0, 2)) * 60 +
+                Number(last.slice(3)) + 30;
 
-                const total = hist.reduce((s, d) => s + d.smoked, 0);
+            next = mins >= 1440
+                ? '23:00'
+                : String(Math.floor(mins / 60)).padStart(2, '0') +
+                  ':' +
+                  String(mins % 60).padStart(2, '0');
+        }
 
-                $('daysCount').textContent =
-                    hist.length + ' ' +
-                    (hist.length === 1
-                        ? 'день'
-                        : hist.length >= 2 && hist.length <= 4
-                            ? 'дня'
-                            : 'дней');
+        state.times.push(next);
+        state.editing = true;
 
-                $('average').textContent = hist.length
-                    ? (total / hist.length).toFixed(1).replace('.', ',')
-                    : '—';
+        persist();
+        renderSchedule();
+        render();
 
-                $('totalDaysSmoked').textContent = total;
+        toast('Добавлено дополнительное время — при необходимости измени его');
+    });
 
-                $('emptyHistory').style.display =
-                    hist.length ? 'none' : 'block';
+    $('limitInput').addEventListener('change', () => {
+        state.limit = Math.max(
+            1,
+            Math.min(20, Number($('limitInput').value) || 10)
+        );
 
-                const list = $('historyList');
+        persist();
+        render();
+    });
 
-                list.innerHTML = '';
+    $('note').addEventListener('input', () => {
+        state.note = $('note').value;
+        persist();
+    });
 
-                [...hist].reverse().forEach(d => {
-                    const entry = document.createElement('div');
+    $('resetChecks').addEventListener('click', () => {
+        if (confirm('Сбросить все отметки за текущий день? История не изменится.')) {
+            state.checked = [];
 
-                    entry.className = 'history-entry';
+            persist();
+            render();
 
-                    const head = document.createElement('div');
+            toast('Отметки сброшены');
+        }
+    });
 
-                    head.className = 'row';
+    // Сохранение итогов дня.
+    $('saveDay').addEventListener('click', () => {
+        if (!confirm(
+            'Сохранить ' + state.checked.length +
+            ' сигарет за ' + safeDate(state.dayStarted) +
+            ' и начать новый день?'
+        )) {
+            return;
+        }
 
-                    const title = document.createElement('strong');
+        state.history.push({
+            day: state.history.length + 1,
+            date: state.dayStarted,
+            smoked: state.checked.length,
+            limit: state.limit,
+            note: state.note || ''
+        });
 
-                    title.textContent = safeDate(d.date) + ' · День ' + d.day;
+        state.checked = [];
+        state.note = '';
 
-                    const pill = document.createElement('span');
+        const d = new Date();
 
-                    pill.className =
-                        'pill' + (d.smoked > d.limit ? ' over' : '');
+        state.dayStarted =
+            `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
-                    pill.textContent = d.smoked <= d.limit
-                        ? 'Лимит соблюдён'
-                        : 'Лимит превышен';
+        state.editing = false;
 
-                    head.append(title, pill);
+        persist();
+        render();
 
-                    entry.appendChild(head);
+        toast('Итог сохранён. Новый день начат.');
+    });
 
-                    const p = document.createElement('p');
+    $('exportBtn').addEventListener('click', () => {
+        const rows = [
+            ['Дата', 'День', 'Выкурено', 'Лимит', 'Заметка'],
+            [
+                state.dayStarted,
+                'Текущий день',
+                state.checked.length,
+                state.limit,
+                state.note || ''
+            ],
+            ...state.history.map(day => [
+                day.date,
+                day.day,
+                day.smoked,
+                day.limit,
+                day.note || ''
+            ])
+        ];
 
-                    p.textContent =
-                        'Выкурено: ' + d.smoked + ' из ' + d.limit +
-                        ' · ' +
-                        (d.smoked <= 20
-                            ? 'на ' + (20 - d.smoked) + ' меньше обычного'
-                            : 'на ' + (d.smoked - 20) + ' больше обычного');
+        const csv = '\uFEFF' + rows
+            .map(row => row.map(value =>
+                '"' + String(value).replace(/"/g, '""') + '"'
+            ).join(';'))
+            .join('\r\n');
 
-                    entry.appendChild(p);
+        const blob = new Blob([csv], {
+            type: 'text/csv;charset=utf-8;'
+        });
 
-                    if (d.note) {
-                        const note = document.createElement('p');
+        const url = URL.createObjectURL(blob);
 
-                        note.className = 'muted';
-                        note.textContent = 'Заметка: ' + d.note;
+        const a = document.createElement('a');
 
-                        entry.appendChild(note);
-                    }
+        a.href = url;
+        a.download = 'dnevnik-kureniya-statistika.csv';
+        a.click();
 
-                    list.appendChild(entry);
-                });
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
 
-                renderSmokingChart();
+        toast('Статистика экспортирована в CSV');
+    });
+
+    $('importBtn').addEventListener('click', () => {
+        $('importFile').click();
+    });
+
+    $('importFile').addEventListener('change', async e => {
+        const f = e.target.files[0];
+
+        if (!f) return;
+
+        try {
+            const s = JSON.parse(await f.text());
+
+            if (
+                !Array.isArray(s.times) ||
+                !Array.isArray(s.checked) ||
+                !Array.isArray(s.history)
+            ) {
+                throw new Error();
             }
-                $('chartPeriod').addEventListener('change', renderSmokingChart);
 
-                $('editBtn').addEventListener('click', () => {
-                    state.editing = !state.editing;
+            if (confirm('Заменить текущие данные данными из файла?')) {
+                state = {...state, ...s};
 
-                    persist();
-                    renderSchedule();
-
-                    $('editBtn').setAttribute('aria-pressed', String(state.editing));
-
-                    toast(state.editing
-                        ? 'Режим редактирования времени включён'
-                        : 'Время сохранено');
-                });
-
-                $('addTimeBtn').addEventListener('click', () => {
-                    const last = state.times.length
-                        ? state.times[state.times.length - 1]
-                        : '09:00';
-
-                    let next = '23:00';
-
-                    if (last && /^\d{2}:\d{2}$/.test(last)) {
-                        const mins =
-                            Number(last.slice(0, 2)) * 60 +
-                            Number(last.slice(3)) + 30;
-
-                        next = mins >= 1440
-                            ? '23:00'
-                            : String(Math.floor(mins / 60)).padStart(2, '0') +
-                              ':' +
-                              String(mins % 60).padStart(2, '0');
-                    }
-
-                    state.times.push(next);
-                    state.editing = true;
-
-                    persist();
-                    renderSchedule();
-                    render();
-
-                    toast('Добавлено дополнительное время — при необходимости измени его');
-                });
-
-                $('limitInput').addEventListener('change', () => {
-                    state.limit = Math.max(
-                        1,
-                        Math.min(20, Number($('limitInput').value) || 10)
-                    );
-
-                    persist();
-                    render();
-                });
-
-                $('note').addEventListener('input', () => {
-                    state.note = $('note').value;
-                    persist();
-                });
-
-                $('resetChecks').addEventListener('click', () => {
-                    if (confirm('Сбросить все отметки за текущий день? История не изменится.')) {
-                        state.checked = [];
-
-                        persist();
-                        render();
-
-                        toast('Отметки сброшены');
-                    }
-                });
-
-                // Сохранение итогов дня.
-                $('saveDay').addEventListener('click', () => {
-                    if (!confirm(
-                        'Сохранить ' + state.checked.length +
-                        ' сигарет за ' + safeDate(state.dayStarted) +
-                        ' и начать новый день?'
-                    )) {
-                        return;
-                    }
-
-                    state.history.push({
-                        day: state.history.length + 1,
-                        date: state.dayStarted,
-                        smoked: state.checked.length,
-                        limit: state.limit,
-                        note: state.note || ''
-                    });
-
-                    normalizeHistoryByDate();
-
-                    state.checked = [];
-                    state.note = '';
-                    state.dayStarted = getNextDiaryDate(state.dayStarted);
-
-                    state.editing = false;
-
-                    persist();
-                    render();
-
-                    toast('Итог сохранён. Новый день начат.');
-                });
-
-                $('exportBtn').addEventListener('click', () => {
-                    const rows = [
-                        ['Дата', 'День', 'Выкурено', 'Лимит', 'Заметка'],
-                        [
-                            state.dayStarted,
-                            'Текущий день',
-                            state.checked.length,
-                            state.limit,
-                            state.note || ''
-                        ],
-                        ...state.history.map(day => [
-                            day.date,
-                            day.day,
-                            day.smoked,
-                            day.limit,
-                            day.note || ''
-                        ])
-                    ];
-
-                    const csv = '\uFEFF' + rows
-                        .map(row => row.map(value =>
-                            '"' + String(value).replace(/"/g, '""') + '"'
-                        ).join(';'))
-                        .join('\r\n');
-
-                    const blob = new Blob([csv], {
-                        type: 'text/csv;charset=utf-8;'
-                    });
-
-                    const url = URL.createObjectURL(blob);
-
-                    const a = document.createElement('a');
-
-                    a.href = url;
-                    a.download = 'dnevnik-kureniya-statistika.csv';
-                    a.click();
-
-                    setTimeout(() => URL.revokeObjectURL(url), 1000);
-
-                    toast('Статистика экспортирована в CSV');
-                });
-
-                $('importBtn').addEventListener('click', () => {
-                    $('importFile').click();
-                });
-
-                $('importFile').addEventListener('change', async e => {
-                    const f = e.target.files[0];
-
-                    if (!f) return;
-
-                    try {
-                        const s = JSON.parse(await f.text());
-
-                        if (
-                            !Array.isArray(s.times) ||
-                            !Array.isArray(s.checked) ||
-                            !Array.isArray(s.history)
-                        ) {
-                            throw new Error();
-                        }
-
-                        if (confirm('Заменить текущие данные данными из файла?')) {
-                            state = {...state, ...s};
-                            normalizeHistoryByDate();
-
-                            persist();
-                            render();
-
-                            toast('Данные импортированы');
-                        }
-                    } catch (err) {
-                        alert('Не удалось прочитать файл. Выбери резервную копию этого приложения.');
-                    }
-
-                    e.target.value = '';
-                });
-
-                $('clearHistory').addEventListener('click', () => {
-                    if (confirm(
-                        'Удалить всю сохранённую историю? Это действие нельзя отменить. Рекомендуется сначала сделать экспорт.'
-                    )) {
-                        state.history = [];
-
-                        persist();
-                        render();
-
-                        toast('История удалена');
-                    }
-                });
-
-                $('loginBtn').addEventListener('click', connectAccount);
-                $('logoutBtn').addEventListener('click', disconnectAccount);
-
-                cloud.auth.getSession().then(async ({data}) => {
-                    if (data.session) {
-                        currentUser = data.session.user;
-
-                        $('authEmail').value = currentUser.email || '';
-                        $('authEmail').disabled = true;
-                        $('authPassword').style.display = 'none';
-                        $('loginBtn').style.display = 'none';
-                        $('logoutBtn').style.display = 'block';
-
-                        await loadCloud();
-                    }
-                });
-
-                load();
+                persist();
                 render();
-            })();
+
+                toast('Данные импортированы');
+            }
+        } catch (err) {
+            alert('Не удалось прочитать файл. Выбери резервную копию этого приложения.');
+        }
+
+        e.target.value = '';
+    });
+
+    $('clearHistory').addEventListener('click', () => {
+        if (confirm(
+            'Удалить всю сохранённую историю? Это действие нельзя отменить. Рекомендуется сначала сделать экспорт.'
+        )) {
+            state.history = [];
+
+            persist();
+            render();
+
+            toast('История удалена');
+        }
+    });
+
+    $('loginBtn').addEventListener('click', connectAccount);
+    $('logoutBtn').addEventListener('click', disconnectAccount);
+
+    cloud.auth.getSession().then(async ({data}) => {
+        if (data.session) {
+            currentUser = data.session.user;
+
+            $('authEmail').value = currentUser.email || '';
+            $('authEmail').disabled = true;
+            $('authPassword').style.display = 'none';
+            $('loginBtn').style.display = 'none';
+            $('logoutBtn').style.display = 'block';
+
+            await loadCloud();
+        }
+    });
+
+    load();
+    render();
+})();
